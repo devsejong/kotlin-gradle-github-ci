@@ -1,0 +1,72 @@
+name: Java CI with Gradle
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - master
+      - ci
+  pull_request:
+    types:
+      - synchronize
+      - opened
+    branches:
+      - develop
+      - master
+
+jobs:
+  run-ci:
+
+    runs-on: ubuntu-latest
+
+    # Service containers to run with `runner-job`
+    services:
+      # Label used to access the service container
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_DATABASE: sample
+          MYSQL_USER: root
+          MYSQL_PASSWORD: password
+          MYSQL_ROOT_PASSWORD: password
+          ports:
+            - 3307:3306
+          options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build and check lint
+        run: ./gradlew clean ktlintCheck classes testClasses integrationTestClasses
+
+      - name: run test
+        run: ./gradlew test
+
+      - name: run integrationTest
+        env:
+          ELASTICSEARCH_TEST_HOSTNAME: localhost
+          ELASTICSEARCH_TEST_PORT: ${{job.services.elasticsearch.ports[9200]}}
+        run: ./gradlew integrationTest
+
+      - name: Cleanup Gradle Cache
+        # Remove some files from the Gradle cache, so they aren't cached by GitHub Actions.
+        # Restoring these files from a GitHub Actions cache might cause problems for future builds.
+        run: |
+          rm -f ~/.gradle/caches/modules-2/modules-2.lock
+          rm -f ~/.gradle/caches/modules-2/gc.properties
